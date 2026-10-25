@@ -12,3 +12,9 @@ uploads/
 .vscode/
 .DS_Store
 Thumbs.db
+desktop.ini
+*.backup
+*.level7-backup
+Food-Delivery-System-source.zip
+coupon_review.txt
+coupon_review_current.txt
