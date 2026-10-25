@@ -1,0 +1,86 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Food Delivery - Admin Alert Test</title>
+</head>
+<body>
+    <h2>Admin WebSocket Alert Test</h2>
+
+    <label for="token">Admin Access Token:</label><br>
+    <textarea id="token" rows="5" cols="70"
+        placeholder="Paste your Admin access token here"></textarea>
+    <br><br>
+
+    <button onclick="connectAdmin()">Connect to Admin Alerts</button>
+    <button onclick="disconnectAdmin()">Disconnect</button>
+
+    <h3>Connection Status</h3>
+    <p id="status">Not connected</p>
+
+    <h3>Received Messages</h3>
+    <pre id="messages"></pre>
+
+    <script>
+        let socket = null;
+
+        function logMessage(message) {
+            document.getElementById("messages").textContent +=
+                JSON.stringify(message, null, 2) + "\n\n";
+        }
+
+        function connectAdmin() {
+            const token = document.getElementById("token").value.trim();
+
+            if (!token) {
+                alert("Paste your Admin access token first.");
+                return;
+            }
+
+            if (socket) {
+                socket.close();
+            }
+
+            socket = new WebSocket(
+                "ws://127.0.0.1:8000/ws/admin?token=" +
+                encodeURIComponent(token)
+            );
+
+            document.getElementById("status").textContent =
+                "Connecting...";
+
+            socket.onopen = function () {
+                document.getElementById("status").textContent =
+                    "WebSocket connected";
+            };
+
+            socket.onmessage = function (event) {
+                try {
+                    logMessage(JSON.parse(event.data));
+                } catch {
+                    logMessage(event.data);
+                }
+            };
+
+            socket.onerror = function () {
+                document.getElementById("status").textContent =
+                    "Connection error";
+            };
+
+            socket.onclose = function (event) {
+                document.getElementById("status").textContent =
+                    "Disconnected (code " + event.code + ")";
+            };
+        }
+
+        function disconnectAdmin() {
+            if (socket) {
+                socket.close();
+                socket = null;
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,123 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Food Delivery - Live Tracking Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 850px; margin: 30px auto; padding: 0 16px; }
+        input, button { padding: 10px; margin: 5px 0; }
+        input { width: min(100%, 420px); box-sizing: border-box; }
+        button { cursor: pointer; }
+        #log { background: #f3f4f6; padding: 12px; min-height: 180px; white-space: pre-wrap; overflow-wrap: anywhere; }
+        .row { margin-bottom: 12px; }
+    </style>
+</head>
+<body>
+    <h1>Live Order Tracking Test</h1>
+    <p>Use a valid JWT token and an order ID your account is permitted to track.</p>
+
+    <div class="row">
+        <label for="token">JWT access token</label><br>
+        <input id="token" type="password" autocomplete="off" placeholder="Paste access token">
+    </div>
+
+    <div class="row">
+        <label for="orderId">Order ID</label><br>
+        <input id="orderId" type="number" min="1" placeholder="For example, 1">
+    </div>
+
+    <div class="row">
+        <button id="connect">Connect to order tracking</button>
+        <button id="disconnect">Disconnect</button>
+    </div>
+
+    <div class="row">
+        <label for="latitude">Partner latitude</label><br>
+        <input id="latitude" type="number" step="any" placeholder="e.g. 17.385">
+        <br>
+        <label for="longitude">Partner longitude</label><br>
+        <input id="longitude" type="number" step="any" placeholder="e.g. 78.4867">
+        <br>
+        <button id="sendLocation">Send location update</button>
+    </div>
+
+    <h2>Connection messages</h2>
+    <pre id="log">Not connected.</pre>
+
+    <script>
+        let socket = null;
+
+        const logElement = document.getElementById("log");
+
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            logElement.textContent =
+                `[${timestamp}] ${message}\n` + logElement.textContent;
+        }
+
+        document.getElementById("connect").addEventListener("click", () => {
+            const token = document.getElementById("token").value.trim();
+            const orderId = document.getElementById("orderId").value.trim();
+
+            if (!token || !orderId || Number(orderId) < 1) {
+                log("Enter a valid token and order ID first.");
+                return;
+            }
+
+            if (socket) {
+                socket.close();
+            }
+
+            const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+            const url = `${protocol}//${location.host}/ws/orders/${encodeURIComponent(orderId)}?token=${encodeURIComponent(token)}`;
+
+            socket = new WebSocket(url);
+
+            socket.addEventListener("open", () => log("WebSocket connected."));
+            socket.addEventListener("message", event => {
+                try {
+                    log(JSON.stringify(JSON.parse(event.data), null, 2));
+                } catch {
+                    log(event.data);
+                }
+            });
+            socket.addEventListener("error", () => log("WebSocket connection error."));
+            socket.addEventListener("close", event => {
+                log(`Connection closed: code ${event.code}${event.reason ? " — " + event.reason : ""}`);
+            });
+        });
+
+        document.getElementById("disconnect").addEventListener("click", () => {
+            if (socket) {
+                socket.close();
+                socket = null;
+            }
+        });
+
+        document.getElementById("sendLocation").addEventListener("click", () => {
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                log("Connect to an order first.");
+                return;
+            }
+
+            const latitude = Number(document.getElementById("latitude").value);
+            const longitude = Number(document.getElementById("longitude").value);
+
+            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                log("Enter valid latitude and longitude.");
+                return;
+            }
+
+            socket.send(JSON.stringify({
+                type: "location_update",
+                latitude,
+                longitude
+            }));
+
+            log("Location update sent.");
+        });
+    </script>
+</body>
+</html>

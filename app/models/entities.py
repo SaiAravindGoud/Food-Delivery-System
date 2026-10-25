@@ -1,0 +1,652 @@
+
+from datetime import datetime, time
+from decimal import Decimal
+
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    Time,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.database import Base
+
+
+class User(Base):
+    __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('Customer', 'RestaurantOwner', 'DeliveryPartner', 'Admin')",
+            name="ck_users_role",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    full_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    email: Mapped[str] = mapped_column(
+        String(255), unique=True, index=True, nullable=False
+    )
+    phone: Mapped[str | None] = mapped_column(
+        String(20), unique=True, nullable=True
+    )
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(
+        String(30), default="Customer", nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
+    is_verified: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    addresses: Mapped[list["Address"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    cart: Mapped["Cart | None"] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    orders: Mapped[list["Order"]] = relationship(back_populates="customer")
+    restaurant: Mapped["Restaurant | None"] = relationship(
+        back_populates="owner", uselist=False
+    )
+    delivery_profile: Mapped["DeliveryPartner | None"] = relationship(
+        back_populates="user", uselist=False
+    )
+
+
+class Restaurant(Base):
+    __tablename__ = "restaurants"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    owner_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    phone: Mapped[str | None] = mapped_column(String(20))
+    email: Mapped[str | None] = mapped_column(String(255))
+    address: Mapped[str] = mapped_column(Text, nullable=False)
+    city: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    cuisine_type: Mapped[str | None] = mapped_column(String(100))
+    latitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
+    longitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
+    opening_time: Mapped[time | None] = mapped_column(Time)
+    closing_time: Mapped[time | None] = mapped_column(Time)
+
+    delivery_radius_km: Mapped[Decimal] = mapped_column(
+        Numeric(6, 2),
+        default=5,
+        server_default="5.00",
+        nullable=False,
+    )
+    min_order_value: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        default=0,
+        server_default="0.00",
+        nullable=False,
+    )
+    avg_preparation_minutes: Mapped[int] = mapped_column(
+        Integer,
+        default=30,
+        server_default="30",
+        nullable=False,
+    )
+    is_temporarily_closed: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="0",
+        nullable=False,
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
+    is_open: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
+    average_rating: Mapped[Decimal] = mapped_column(
+        Numeric(3, 2), default=0, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    owner: Mapped["User"] = relationship(back_populates="restaurant")
+    categories: Mapped[list["MenuCategory"]] = relationship(
+        back_populates="restaurant", cascade="all, delete-orphan"
+    )
+    menu_items: Mapped[list["MenuItem"]] = relationship(
+        back_populates="restaurant", cascade="all, delete-orphan"
+    )
+    orders: Mapped[list["Order"]] = relationship(back_populates="restaurant")
+    reviews: Mapped[list["Review"]] = relationship(back_populates="restaurant")
+
+
+class MenuCategory(Base):
+    __tablename__ = "menu_categories"
+    __table_args__ = (
+        UniqueConstraint(
+            "restaurant_id",
+            "name",
+            name="uq_category_restaurant_name",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    restaurant_id: Mapped[int] = mapped_column(
+        ForeignKey("restaurants.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
+
+    restaurant: Mapped["Restaurant"] = relationship(back_populates="categories")
+    menu_items: Mapped[list["MenuItem"]] = relationship(
+        back_populates="category"
+    )
+
+
+class MenuItem(Base):
+    __tablename__ = "menu_items"
+    __table_args__ = (
+        CheckConstraint("price >= 0", name="ck_menu_items_price"),
+        Index(
+            "ix_menu_items_restaurant_available",
+            "restaurant_id",
+            "is_available",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    restaurant_id: Mapped[int] = mapped_column(
+        ForeignKey("restaurants.id"), nullable=False, index=True
+    )
+    category_id: Mapped[int] = mapped_column(
+        ForeignKey("menu_categories.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    packaging_charge: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), default=0, nullable=False
+    )
+    image_url: Mapped[str | None] = mapped_column(String(500))
+    is_vegetarian: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    is_available: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
+    preparation_time_minutes: Mapped[int] = mapped_column(
+        Integer, default=20, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    restaurant: Mapped["Restaurant"] = relationship(back_populates="menu_items")
+    category: Mapped["MenuCategory"] = relationship(back_populates="menu_items")
+
+
+class Address(Base):
+    __tablename__ = "addresses"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    label: Mapped[str] = mapped_column(
+        String(50), default="Home", nullable=False
+    )
+    recipient_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    phone: Mapped[str] = mapped_column(String(20), nullable=False)
+    address_line: Mapped[str] = mapped_column(Text, nullable=False)
+    city: Mapped[str] = mapped_column(String(100), nullable=False)
+    state: Mapped[str] = mapped_column(String(100), nullable=False)
+    postal_code: Mapped[str] = mapped_column(String(15), nullable=False)
+    latitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
+    longitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
+    is_default: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+
+    user: Mapped["User"] = relationship(back_populates="addresses")
+    orders: Mapped[list["Order"]] = relationship(
+        back_populates="delivery_address"
+    )
+
+
+class Cart(Base):
+    __tablename__ = "carts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), unique=True, nullable=False
+    )
+    restaurant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("restaurants.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    user: Mapped["User"] = relationship(back_populates="cart")
+    items: Mapped[list["CartItem"]] = relationship(
+        back_populates="cart", cascade="all, delete-orphan"
+    )
+
+
+class CartItem(Base):
+    __tablename__ = "cart_items"
+    __table_args__ = (
+        UniqueConstraint("cart_id", "menu_item_id", name="uq_cart_menu_item"),
+        CheckConstraint("quantity > 0", name="ck_cart_items_quantity"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    cart_id: Mapped[int] = mapped_column(
+        ForeignKey("carts.id"), nullable=False, index=True
+    )
+    menu_item_id: Mapped[int] = mapped_column(
+        ForeignKey("menu_items.id"), nullable=False
+    )
+    quantity: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+
+    cart: Mapped["Cart"] = relationship(back_populates="items")
+
+
+class Coupon(Base):
+    __tablename__ = "coupons"
+    __table_args__ = (
+        CheckConstraint(
+            "discount_value > 0",
+            name="ck_coupons_discount_value",
+        ),
+        CheckConstraint(
+            "minimum_order_amount >= 0",
+            name="ck_coupons_minimum",
+        ),
+        CheckConstraint(
+            "usage_limit IS NULL OR usage_limit > 0",
+            name="ck_coupons_usage_limit",
+        ),
+        CheckConstraint(
+            "used_count >= 0",
+            name="ck_coupons_used_count",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    code: Mapped[str] = mapped_column(
+        String(50), unique=True, nullable=False
+    )
+    discount_type: Mapped[str] = mapped_column(
+        String(20), default="percentage", nullable=False
+    )
+    discount_value: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), nullable=False
+    )
+    minimum_order_amount: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), default=0, nullable=False
+    )
+    maximum_discount: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    usage_limit: Mapped[int | None] = mapped_column(Integer)
+    used_count: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
+
+
+class Order(Base):
+    __tablename__ = "orders"
+    __table_args__ = (
+        CheckConstraint("subtotal >= 0", name="ck_orders_subtotal"),
+        CheckConstraint("delivery_fee >= 0", name="ck_orders_delivery_fee"),
+        CheckConstraint("discount_amount >= 0", name="ck_orders_discount"),
+        CheckConstraint("total_amount >= 0", name="ck_orders_total"),
+        Index("ix_orders_customer_status", "customer_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_number: Mapped[str] = mapped_column(
+        String(40), unique=True, nullable=False, index=True
+    )
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    restaurant_id: Mapped[int] = mapped_column(
+        ForeignKey("restaurants.id"), nullable=False, index=True
+    )
+    delivery_address_id: Mapped[int] = mapped_column(
+        ForeignKey("addresses.id"), nullable=False
+    )
+    coupon_id: Mapped[int | None] = mapped_column(ForeignKey("coupons.id"))
+    status: Mapped[str] = mapped_column(
+        String(30), default="Pending", nullable=False
+    )
+    payment_method: Mapped[str] = mapped_column(
+        String(30), default="Cash", nullable=False
+    )
+    payment_status: Mapped[str] = mapped_column(
+        String(30), default="Pending", nullable=False
+    )
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    delivery_fee: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), default=0, nullable=False
+    )
+    discount_amount: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), default=0, nullable=False
+    )
+    total_amount: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), nullable=False
+    )
+    special_instructions: Mapped[str | None] = mapped_column(Text)
+
+    estimated_preparation_minutes: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    estimated_delivery_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    placed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    customer: Mapped["User"] = relationship(back_populates="orders")
+    restaurant: Mapped["Restaurant"] = relationship(back_populates="orders")
+    delivery_address: Mapped["Address"] = relationship(
+        back_populates="orders"
+    )
+    items: Mapped[list["OrderItem"]] = relationship(
+        back_populates="order", cascade="all, delete-orphan"
+    )
+    delivery: Mapped["Delivery | None"] = relationship(
+        back_populates="order", uselist=False
+    )
+    history: Mapped[list["OrderStatusHistory"]] = relationship(
+        back_populates="order", cascade="all, delete-orphan"
+    )
+    payment: Mapped["Payment | None"] = relationship(
+        back_populates="order", uselist=False
+    )
+    review: Mapped["Review | None"] = relationship(
+        back_populates="order", uselist=False
+    )
+
+
+class OrderItem(Base):
+    __tablename__ = "order_items"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_order_items_quantity"),
+        CheckConstraint("unit_price >= 0", name="ck_order_items_unit_price"),
+        CheckConstraint("subtotal >= 0", name="ck_order_items_subtotal"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id"), nullable=False, index=True
+    )
+    menu_item_id: Mapped[int] = mapped_column(
+        ForeignKey("menu_items.id"), nullable=False
+    )
+    item_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+
+    order: Mapped["Order"] = relationship(back_populates="items")
+
+
+class DeliveryPartner(Base):
+    __tablename__ = "delivery_partners"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), unique=True, nullable=False
+    )
+    vehicle_type: Mapped[str | None] = mapped_column(String(50))
+    vehicle_number: Mapped[str | None] = mapped_column(String(30))
+    is_available: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
+    current_latitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
+    current_longitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
+    last_location_update: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    user: Mapped["User"] = relationship(back_populates="delivery_profile")
+    deliveries: Mapped[list["Delivery"]] = relationship(
+        back_populates="delivery_partner"
+    )
+
+
+class Delivery(Base):
+    __tablename__ = "deliveries"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id"), unique=True, nullable=False
+    )
+    delivery_partner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("delivery_partners.id"), nullable=True, index=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(30), default="Pending", nullable=False
+    )
+    pickup_otp: Mapped[str | None] = mapped_column(String(6))
+    delivery_otp: Mapped[str | None] = mapped_column(String(6))
+    pickup_verified: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    delivery_verified: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    picked_up_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    delivered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    current_latitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
+    current_longitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
+
+    order: Mapped["Order"] = relationship(back_populates="delivery")
+    delivery_partner: Mapped["DeliveryPartner | None"] = relationship(
+        back_populates="deliveries"
+    )
+
+
+class DeliveryOffer(Base):
+    __tablename__ = "delivery_offers"
+    __table_args__ = (
+        Index(
+            "ix_delivery_offers_order_status",
+            "order_id",
+            "status",
+        ),
+        Index(
+            "ix_delivery_offers_partner_status",
+            "delivery_partner_id",
+            "status",
+        ),
+        Index(
+            "ix_delivery_offers_status_expires",
+            "status",
+            "expires_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id"),
+        nullable=False,
+        index=True,
+    )
+    delivery_partner_id: Mapped[int] = mapped_column(
+        ForeignKey("delivery_partners.id"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default="Pending",
+        nullable=False,
+    )
+    offered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    responded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+
+class OrderStatusHistory(Base):
+    __tablename__ = "order_status_history"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id"), nullable=False, index=True
+    )
+    old_status: Mapped[str | None] = mapped_column(String(30))
+    new_status: Mapped[str] = mapped_column(String(30), nullable=False)
+    changed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    order: Mapped["Order"] = relationship(back_populates="history")
+
+
+class Payment(Base):
+    __tablename__ = "payments"
+    __table_args__ = (
+        CheckConstraint("amount >= 0", name="ck_payments_amount"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id"), unique=True, nullable=False
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    payment_method: Mapped[str] = mapped_column(String(30), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(30), default="Pending", nullable=False
+    )
+    transaction_reference: Mapped[str | None] = mapped_column(
+        String(255), unique=True
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    order: Mapped["Order"] = relationship(back_populates="payment")
+
+
+class Review(Base):
+    __tablename__ = "reviews"
+    __table_args__ = (
+        CheckConstraint(
+            "rating >= 1 AND rating <= 5",
+            name="ck_reviews_rating",
+        ),
+        UniqueConstraint("order_id", name="uq_reviews_order"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id"), nullable=False
+    )
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    restaurant_id: Mapped[int] = mapped_column(
+        ForeignKey("restaurants.id"), nullable=False, index=True
+    )
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    order: Mapped["Order"] = relationship(back_populates="review")
+    restaurant: Mapped["Restaurant"] = relationship(back_populates="reviews")
+class AdminAlert(Base):
+    __tablename__ = "admin_alerts"
+    __table_args__ = (
+        UniqueConstraint(
+            "alert_key",
+            name="uq_admin_alerts_alert_key",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    alert_key: Mapped[str] = mapped_column(String(150), nullable=False)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    alert_type: Mapped[str] = mapped_column(
+        String(50),
+        default="unassigned_delivery",
+        nullable=False,
+    )
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        nullable=False,
+    )
